@@ -4,7 +4,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/DanielHeath/shotgun-go/webprocess"
 	"io/ioutil"
 	"launchpad.net/goyaml"
 	logger "log"
@@ -99,7 +98,7 @@ func main() {
 	log.Println("Build command: " + buildCmd)
 	log.Println("Run command: " + runCmd)
 
-	wp := webprocess.NewWebProcess(
+	wp := NewWebProcess(
 		checkCmd,
 		buildCmd,
 		runCmd,

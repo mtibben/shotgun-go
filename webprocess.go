@@ -1,4 +1,4 @@
-package webprocess
+package main
 
 import (
 	"bytes"
