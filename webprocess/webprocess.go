@@ -12,7 +12,15 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
+)
+
+// exit statuses
+const (
+	OK      = 0
+	REBUILD = 1
+	RESTART = 2
 )
 
 type WebProcess struct {
@@ -60,20 +68,37 @@ func (w *WebProcess) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w.m.Lock()
 	defer w.m.Unlock()
 
-	if w.rebuildRequired() || (!w.running()) {
-		err := w.reload()
-		if err != nil {
-			bytes, _ := ioutil.ReadAll(&w.output)
-			output := string(bytes)
-			http.Error(rw, err.Error()+"\n\n"+output, http.StatusInternalServerError)
-		}
+	var err error
+	action := w.check()
+	if action == RESTART {
+		err = w.restart()
 	}
+	if !w.running() || action == REBUILD {
+		err = w.reload()
+	}
+	if err != nil {
+		bytes, _ := ioutil.ReadAll(&w.output)
+		output := string(bytes)
+		http.Error(rw, err.Error()+"\n\n"+output, http.StatusInternalServerError)
+		return
+	}
+
 	proxy := httputil.NewSingleHostReverseProxy(w.TargetUrl)
 	proxy.ServeHTTP(responseWrapper{rw, w}, r)
 }
 
+func (w *WebProcess) restart() (err error) {
+	w.Stop()
+	err = w.start()
+	if err != nil {
+		w.Log.Println(err)
+		return
+	}
+	err = w.waitUntilUp()
+	return
+}
+
 func (w *WebProcess) reload() (err error) {
-	w.Log.Println("Reloading...")
 	w.Stop()
 	err = w.rebuild()
 	if err != nil {
@@ -84,8 +109,6 @@ func (w *WebProcess) reload() (err error) {
 	if err != nil {
 		w.Log.Println(err)
 		return
-	} else {
-		w.Log.Println("Started pid", w.command.Process.Pid)
 	}
 	err = w.waitUntilUp()
 	return
@@ -133,6 +156,7 @@ func (w *WebProcess) start() error {
 	}
 	go w.command.Wait()
 
+	w.Log.Println("Started pid", w.command.Process.Pid)
 	return nil
 }
 
@@ -176,15 +200,22 @@ func (w *WebProcess) waitUntilUp() error {
 	return nil
 }
 
-func (w *WebProcess) rebuildRequired() bool {
+func (w *WebProcess) check() (exitstatus int) {
+	result := exec.Command("bash", "-c", w.CheckCmd).Run()
 
-	uptodate := exec.Command("bash", "-c", w.CheckCmd).Run()
-
-	if uptodate != nil {
-		w.Log.Printf("Check: '%s' -> Rebuild required.\n", w.CheckCmd)
-	} else {
-		w.Log.Printf("Check: '%s' -> Up to date.\n", w.CheckCmd)
+	if result != nil {
+		exiterr, ok := result.(*exec.ExitError)
+		if ok {
+			exitstatus = exiterr.Sys().(syscall.WaitStatus).ExitStatus()
+			w.Log.Println("Check: got exit status", exitstatus)
+		} else {
+			panic("Couldn't case to ExitError")
+		}
 	}
 
-	return uptodate != nil
+	if exitstatus == REBUILD || exitstatus == RESTART {
+		return exitstatus
+	}
+
+	return OK
 }
