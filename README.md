@@ -1,7 +1,9 @@
 shotgun-go
 ==========
 
-Shotgun-go is an automatic code reloading tool for a go web server
+Shotgun-go is an automatic code reloading dev server for go. 
+
+Shotgun-go listens for http requests but does not load the application. When a request is recieved, the application is  built and run. Each request triggers a check for changes, and if necessary a compile and reload of the application.
 
 Using
 ------
