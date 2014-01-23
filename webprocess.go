@@ -46,9 +46,6 @@ func NewWebProcess(checkCmd, buildCmd, runCmd string, targeturl *url.URL, log *l
 	}
 	wp.clearCmd()
 
-	// Always trigger a rebuild at start time.
-	err := wp.reload()
-	logger.Println(err)
 	return wp
 }
 
@@ -65,26 +62,50 @@ func (r responseWrapper) WriteHeader(code int) {
 }
 
 func (w *WebProcess) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	w.m.Lock()
-	defer w.m.Unlock()
-
-	var err error
-	action := w.check()
-	if action == RESTART {
-		err = w.restart()
-	}
-	if !w.running() || action == REBUILD {
-		err = w.reload()
-	}
+	err := w.prepareProcessForRequest()
 	if err != nil {
-		bytes, _ := ioutil.ReadAll(&w.output)
-		output := string(bytes)
-		http.Error(rw, err.Error()+"\n\n"+output, http.StatusInternalServerError)
+		// dump the output buffer to the http response
+		output, _ := ioutil.ReadAll(&w.output)
+		http.Error(rw, err.Error()+"\n\n"+string(output), http.StatusInternalServerError)
 		return
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(w.TargetUrl)
 	proxy.ServeHTTP(responseWrapper{rw, w}, r)
+}
+
+func (w *WebProcess) prepareProcessForRequest() (err error) {
+	w.m.Lock()
+	defer w.m.Unlock()
+
+	action := w.check()
+	if !w.isRunning() || action == REBUILD {
+		err = w.rebuildAndStart()
+	} else if action == RESTART {
+		err = w.restart()
+	}
+
+	return err
+}
+
+func (w *WebProcess) check() (exitstatus int) {
+	result := exec.Command("bash", "-c", w.CheckCmd).Run()
+
+	if result != nil {
+		exiterr, ok := result.(*exec.ExitError)
+		if ok {
+			exitstatus = exiterr.Sys().(syscall.WaitStatus).ExitStatus()
+			w.Log.Println("Check: got exit status", exitstatus)
+		} else {
+			panic("Couldn't case to ExitError")
+		}
+	}
+
+	if exitstatus == REBUILD || exitstatus == RESTART {
+		return exitstatus
+	}
+
+	return OK
 }
 
 func (w *WebProcess) restart() (err error) {
@@ -94,24 +115,17 @@ func (w *WebProcess) restart() (err error) {
 		w.Log.Println(err)
 		return
 	}
-	err = w.waitUntilUp()
+	err = w.waitUntilIsUp()
 	return
 }
 
-func (w *WebProcess) reload() (err error) {
-	w.Stop()
+func (w *WebProcess) rebuildAndStart() (err error) {
 	err = w.rebuild()
 	if err != nil {
 		w.Log.Println(err)
 		return
 	}
-	err = w.start()
-	if err != nil {
-		w.Log.Println(err)
-		return
-	}
-	err = w.waitUntilUp()
-	return
+	return w.restart()
 }
 
 func (w *WebProcess) Stop() {
@@ -142,7 +156,7 @@ func (w *WebProcess) rebuild() error {
 
 func (w *WebProcess) start() error {
 	w.Log.Println("Start: " + w.RunCmd)
-	if w.running() {
+	if w.isRunning() {
 		return errors.New("Can't start, already running.")
 	}
 
@@ -160,34 +174,32 @@ func (w *WebProcess) start() error {
 	return nil
 }
 
-func (w *WebProcess) running() bool {
+func (w *WebProcess) isRunning() bool {
 	return (w.command != nil) &&
 		(w.command.Process != nil) &&
 		((w.command.ProcessState == nil) || !w.command.ProcessState.Exited())
 }
 
-func (w *WebProcess) up() bool {
+func (w *WebProcess) isUp() bool {
 	_, err := http.Head(w.TargetUrl.String())
 	return err == nil
 }
 
-func (w *WebProcess) waitUntilUp() error {
-	var ticks int
-	if !w.running() {
-		return errors.New("Not running.")
+func (w *WebProcess) waitUntilIsUp() error {
+	if !w.isRunning() {
+		return errors.New("Process is not running.")
 	}
-	if w.up() {
-		return nil
-	}
+
 	w.Log.Println("Waiting for process...")
 	ticker := time.NewTicker(time.Millisecond * 200)
 	defer ticker.Stop()
 
+	ticks := 0
 	for _ = range ticker.C {
-		if !w.running() {
+		if !w.isRunning() {
 			return errors.New("Process not running")
 		}
-		if w.up() {
+		if w.isUp() {
 			return nil
 		}
 		w.Log.Print(".")
@@ -198,24 +210,4 @@ func (w *WebProcess) waitUntilUp() error {
 		}
 	}
 	return nil
-}
-
-func (w *WebProcess) check() (exitstatus int) {
-	result := exec.Command("bash", "-c", w.CheckCmd).Run()
-
-	if result != nil {
-		exiterr, ok := result.(*exec.ExitError)
-		if ok {
-			exitstatus = exiterr.Sys().(syscall.WaitStatus).ExitStatus()
-			w.Log.Println("Check: got exit status", exitstatus)
-		} else {
-			panic("Couldn't case to ExitError")
-		}
-	}
-
-	if exitstatus == REBUILD || exitstatus == RESTART {
-		return exitstatus
-	}
-
-	return OK
 }
