@@ -1,20 +1,32 @@
 shotgun-go
 ==========
 
-A port of the rack reloading tool shotgun to go.
+Shotgun-go is an automatic code reloading tool for a go web server
 
 Using
 ------
 Example Usage:
-`shotgun -u http://localhost:8008 -p 8010 -checkCmd='exit `+"`find -name *.go -newer ./bin/myapp | wc -l`"+`' -buildCmd="go build -o ./bin/myapp myapp" -runCmd="./bin/myapp"`
+```
+shotgun -u http://localhost:8008 -p 8010 \
+    -checkCmd='exit `find -name *.go -newer ./bin/myapp | wc -l`' \
+    -buildCmd="go build -o ./bin/myapp myapp" \
+    -runCmd="./bin/myapp"`
+```
 
-Or simply use a yml config file named `.shotgun-go` and run shotgun
+Arguments:
+- `-url` or `-u` The url to proxy for
+- `-port` or `-p` Port for shotgun to listen for http requests on
+- `-checkCmd` command to check for changes. Return 0 for no change, 1 for rebuild, and 2 for restart.
+- `-buildCmd` command to build the binary.
+- `-runCmd` command to run the binary.
+
+Alternatively, use a yml config file named `.shotgun-go` and run `shotgun`
 ```yml
 env:
   - FOO: "bar"
 port: 8010
 url: http://localhost:8008
-checkcmd: "exit `+"`find -name *.go -newer ./bin/myapp | wc -l`"+`"
+checkcmd: "exit `find -name *.go -newer ./bin/myapp | wc -l`
 buildcmd: "go build -o ./bin/myapp myapp"
 runcmd: "./bin/myapp"
 ```
