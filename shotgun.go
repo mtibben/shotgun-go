@@ -65,7 +65,7 @@ func init() {
 
 			for _, envmap := range ymlconfig.Env {
 				for key, value := range envmap {
-					log.Println("Enironment set " + key + ": " + value)
+					log.Println("Environment set " + key + ": " + value)
 					os.Setenv(key, value)
 				}
 			}
