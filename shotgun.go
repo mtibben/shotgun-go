@@ -5,13 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"launchpad.net/goyaml"
 	logger "log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
+
+	goyaml "gopkg.in/yaml.v1"
 )
 
 var log *logger.Logger
